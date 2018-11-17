@@ -88,6 +88,8 @@ public final class DrawableDB {
 
     private static final Logger logger = Logger.getLogger(DrawableDB.class.getName());
 
+    private static long elapsedTime = 0;
+    
     //column name constants//////////////////////
     private static final String ANALYZED = "analyzed"; //NON-NLS
 
@@ -160,6 +162,8 @@ public final class DrawableDB {
     private Set<Long> hasHashCache = new HashSet<>(); // obj id of files with hash set hits
     private Set<Long> hasExifCache = new HashSet<>(); // obj id of files with EXIF (make/model)
     private int cacheBuildCount = 0; // number of tasks taht requested the caches be built
+    
+    private List<DrawableFile> drawableFilesBatch =  new ArrayList<>();
     
     
     static {//make sure sqlite driver is loaded // possibly redundant
@@ -803,11 +807,20 @@ public final class DrawableDB {
     public void updateFile(DrawableFile f) {
         DrawableTransaction trans = null;
         CaseDbTransaction caseDbTransaction = null;
+        
+        drawableFilesBatch.add(f);
+        if (drawableFilesBatch.size() < 200) {
+            return;
+        }
 
+        long start = System.nanoTime();
         try {
             trans = beginTransaction();
             caseDbTransaction = tskCase.beginTransaction();
-            updateFile(f, trans, caseDbTransaction);
+            
+            for (DrawableFile batchedFile: drawableFilesBatch) {
+                updateFile(batchedFile, trans, caseDbTransaction);
+            }
             caseDbTransaction.commit();
             caseDbTransaction = null;
             commitTransaction(trans, true);
@@ -827,6 +840,13 @@ public final class DrawableDB {
             if (null != trans) {
                 rollbackTransaction(trans);
             }
+            
+            long end = System.nanoTime();
+            elapsedTime += (end - start);
+            
+            drawableFilesBatch.clear(); // empty the list, dont time it
+            
+            System.out.println("Elapsed time = " + elapsedTime); 
         }
 
     }
