@@ -19,6 +19,10 @@
 package org.sleuthkit.autopsy.imagegallery.gui.navpanel;
 
 import java.util.function.Function;
+import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
+import javafx.collections.ObservableList;
 import javafx.collections.transformation.SortedList;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -40,12 +44,14 @@ final public class HashHitGroupList extends NavPanel<DrawableGroup> {
     @ThreadConfined(type = ThreadConfined.ThreadType.JFX)
     private final ListView<DrawableGroup> groupList = new ListView<>();
 
+    private final ObservableList<DrawableGroup> groupsWithHashHits = FXCollections.observableArrayList();
+    
     /**
      * sorted list of groups, setting a new comparator on this changes the
      * sorting in the ListView.
      */
     @ThreadConfined(type = ThreadConfined.ThreadType.JFX)
-    private SortedList<DrawableGroup> sorted;
+    private SortedList<DrawableGroup> sorted = new SortedList<>(FXCollections.observableArrayList(groupsWithHashHits));
 
     public HashHitGroupList(ImageGalleryController controller) {
         super(controller);
@@ -78,13 +84,44 @@ final public class HashHitGroupList extends NavPanel<DrawableGroup> {
         setGraphic(new ImageView("org/sleuthkit/autopsy/imagegallery/images/hashset_hits.png")); //NON-NLS
 
         getBorderPane().setCenter(groupList);
-        sorted = getController().getGroupManager().getAnalyzedGroups()
-                .filtered(group -> group.getHashSetHitsCount() > 0)
-                .sorted(getDefaultComparator());
+        
+        sorted.setComparator(getDefaultComparator());
+        
+//        sorted = getController().getGroupManager().getAnalyzedGroups()
+//                .filtered(group -> group.getHashSetHitsCount() > 0)
+//                .sorted(getDefaultComparator());
+        
+        groupsWithHashHits.addAll(getController().getGroupManager().getAnalyzedGroups()
+                                    .filtered(group -> group.getHashSetHitsCount() > 0));
+        
 
         GroupCellFactory groupCellFactory = new GroupCellFactory(getController(), comparatorProperty());
         groupList.setCellFactory(groupCellFactory::getListCell);
         groupList.setItems(sorted);
+        
+        getController().getGroupManager().getAnalyzedGroups().addListener(new ListChangeListener<DrawableGroup>() {
+            @Override
+            public void onChanged(ListChangeListener.Change<? extends DrawableGroup> c) {
+
+                System.out.println("RAMAN: getAnalyzedGroups() listener is called... ");
+                while (c.next()) {
+
+                    c.getAddedSubList().forEach((DrawableGroup t) -> {
+                        if (t.getHashSetHitsCount() > 0) {
+                            System.out.println("RAMAN: Adding new group to groupsWithHashHits... " + t.getGroupKey());
+                            Platform.runLater(() -> groupsWithHashHits.add(t));
+                        }
+                    });
+                    c.getRemoved().forEach((DrawableGroup t) -> {
+                         System.out.println("RAMAN: Adding new group to groupsWithHashHits... " + t.getGroupKey());
+                         
+                        Platform.runLater(()-> groupsWithHashHits.remove(t));
+                    });
+
+                 }
+            }
+      });
+        
     }
 
     @ThreadConfined(type = ThreadConfined.ThreadType.JFX)
