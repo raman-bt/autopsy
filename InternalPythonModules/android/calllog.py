@@ -174,4 +174,11 @@ class CallLogAnalyzer(general.AndroidComponentAnalyzer):
         finally:
             if bbartifacts:
                 IngestServices.getInstance().fireModuleDataEvent(ModuleDataEvent(general.MODULE_NAME, BlackboardArtifact.ARTIFACT_TYPE.TSK_CALLLOG, bbartifacts))
-
+            try:
+                if resultSet is not None:
+                    resultSet.close()
+                statement.close()
+                connection.close()
+            except Exception as ex:
+                # Error closing database.
+                pass
