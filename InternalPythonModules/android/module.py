@@ -107,6 +107,8 @@ class AndroidIngestModule(DataSourceIngestModule):
                      googlemaplocation.GoogleMapLocationAnalyzer(), browserlocation.BrowserLocationAnalyzer(),
                      cachelocation.CacheLocationAnalyzer(), imo.IMOAnalyzer(),
                      xender.XenderAnalyzer(), zapya.ZapyaAnalyzer(), shareit.ShareItAnalyzer(),
+                     line.LineAnalyzer(), whatsapp.WhatsAppAnalyzer(), 
+                     textnow.TextNowAnalyzer(), skype.SkypeAnalyzer(), viber.ViberAnalyzer(),
                      fbmessenger.FBMessengerAnalyzer(),
                      sbrowser.SBrowserAnalyzer(), operabrowser.OperaAnalyzer(),
                      oruxmaps.OruxMapsAnalyzer(),
