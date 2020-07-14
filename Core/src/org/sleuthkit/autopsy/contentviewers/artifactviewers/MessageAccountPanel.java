@@ -22,8 +22,11 @@ package org.sleuthkit.autopsy.contentviewers.artifactviewers;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
@@ -37,8 +40,10 @@ import javax.swing.JPanel;
 import javax.swing.LayoutStyle.ComponentPlacement;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import org.apache.commons.lang3.StringUtils;
 import org.openide.util.NbBundle.Messages;
 import org.sleuthkit.autopsy.casemodule.Case;
+import org.sleuthkit.autopsy.centralrepository.datamodel.CentralRepoAccount;
 import org.sleuthkit.autopsy.centralrepository.datamodel.Persona;
 import org.sleuthkit.autopsy.centralrepository.datamodel.PersonaAccount;
 import org.sleuthkit.autopsy.centralrepository.persona.PersonaDetailsDialog;
@@ -48,6 +53,7 @@ import org.sleuthkit.autopsy.centralrepository.persona.PersonaDetailsPanel;
 import org.sleuthkit.autopsy.coreutils.Logger;
 import org.sleuthkit.datamodel.Account;
 import org.sleuthkit.datamodel.BlackboardArtifact;
+import org.sleuthkit.datamodel.BlackboardAttribute;
 import org.sleuthkit.datamodel.CommunicationsManager;
 import org.sleuthkit.datamodel.TskCoreException;
 
@@ -61,7 +67,17 @@ final class MessageAccountPanel extends JPanel {
     private final static Logger logger = Logger.getLogger(MessageAccountPanel.class.getName());
 
     private AccountFetcher currentFetcher = null;
+    private BlackboardArtifact artifact;
+     
 
+     private static final Set<Integer> ACCOUNT_ATTRIBUTE_TYPES = new HashSet<Integer>(Arrays.asList(
+            
+            BlackboardAttribute.ATTRIBUTE_TYPE.TSK_PHONE_NUMBER_FROM.getTypeID(),
+            BlackboardAttribute.ATTRIBUTE_TYPE.TSK_PHONE_NUMBER_TO.getTypeID(),
+            BlackboardAttribute.ATTRIBUTE_TYPE.TSK_EMAIL_FROM.getTypeID(),
+            BlackboardAttribute.ATTRIBUTE_TYPE.TSK_EMAIL_TO.getTypeID()
+    ));
+     
     /**
      * Set the new artifact for the panel.
      *
@@ -78,18 +94,69 @@ final class MessageAccountPanel extends JPanel {
             return;
         }
 
+        this.artifact = artifact;
         if (currentFetcher != null && !currentFetcher.isDone()) {
             currentFetcher.cancel(true);
         }
 
-        currentFetcher = new AccountFetcher(artifact);
+        currentFetcher = new AccountsByRelationshipsFetcher(artifact);
         currentFetcher.execute();
     }
 
     /**
-     * Swingworker that fetches the accounts for a given artifact
+     * Fetches accounts by searching for account identifiers in the To/From
+     * attributes.
      */
-    class AccountFetcher extends SwingWorker<List<AccountContainer>, Void> {
+    private void fetchAccountsByAttributes() {
+        // kick off a swingworker to search accounts.
+        currentFetcher = new AccountsByIdentifierFetcher(artifact);
+        currentFetcher.execute();
+    }
+    
+    @Messages({
+            "MessageAccountPanel_no_matches=No matches found.",
+        })
+    private void showAccounts(List<AccountContainer> dataList) {
+        
+        if (!dataList.isEmpty()) {
+                    dataList.forEach(container -> {
+                        container.initalizeSwingControls();
+                    });
+
+                    GroupLayout layout = new GroupLayout(MessageAccountPanel.this);
+                    layout.setHorizontalGroup(
+                            layout.createParallelGroup(Alignment.LEADING)
+                                    .addGroup(layout.createSequentialGroup()
+                                            .addContainerGap()
+                                            .addGroup(getMainHorizontalGroup(layout, dataList))
+                                            .addContainerGap(158, Short.MAX_VALUE)));
+
+                    layout.setVerticalGroup(getMainVerticalGroup(layout, dataList));
+                    setLayout(layout);
+                    repaint();
+                } else {
+                    // No matched found, display a message.
+                    JPanel messagePanel = new javax.swing.JPanel();
+                    JLabel messageLabel = new javax.swing.JLabel();
+
+                    messagePanel.setLayout(new java.awt.BorderLayout());
+
+                    messageLabel.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
+                    messageLabel.setText(Bundle.MessageAccountPanel_no_matches());
+                    messageLabel.setEnabled(false);
+                    messagePanel.add(messageLabel, java.awt.BorderLayout.CENTER);
+
+                    setLayout(new javax.swing.OverlayLayout(MessageAccountPanel.this));
+
+                    add(messagePanel);
+                    repaint();
+                }
+    }
+    /**
+     * Swingworker that fetches the accounts for a given artifact, by searching
+     * 
+     */
+    abstract class AccountFetcher extends SwingWorker<List<AccountContainer>, Void> {
 
         private final BlackboardArtifact artifact;
 
@@ -101,7 +168,19 @@ final class MessageAccountPanel extends JPanel {
         AccountFetcher(BlackboardArtifact artifact) {
             this.artifact = artifact;
         }
-
+    }
+    
+    class AccountsByRelationshipsFetcher extends AccountFetcher {
+        
+        /**
+         * Construct a new AccountsByRelationshipsFetcher.
+         *
+         * @param artifact The artifact to get accounts for.
+         */
+        AccountsByRelationshipsFetcher(BlackboardArtifact artifact) {
+           super(artifact);
+        }
+        
         @Override
         protected List<AccountContainer> doInBackground() throws Exception {
             List<AccountContainer> dataList = new ArrayList<>();
@@ -131,21 +210,12 @@ final class MessageAccountPanel extends JPanel {
             try {
                 List<AccountContainer> dataList = get();
 
-                dataList.forEach(container -> {
-                    container.initalizeSwingControls();
-                });
-
-                GroupLayout layout = new GroupLayout(MessageAccountPanel.this);
-                layout.setHorizontalGroup(
-                        layout.createParallelGroup(Alignment.LEADING)
-                                .addGroup(layout.createSequentialGroup()
-                                        .addContainerGap()
-                                        .addGroup(getMainHorizontalGroup(layout, dataList))
-                                        .addContainerGap(158, Short.MAX_VALUE)));
-
-                layout.setVerticalGroup(getMainVerticalGroup(layout, dataList));
-                setLayout(layout);
-                repaint();
+                if (!dataList.isEmpty()) {
+                    showAccounts(dataList);
+                } else {
+                    fetchAccountsByAttributes();
+                }
+                
             } catch (CancellationException ex) {
                 logger.log(Level.INFO, "MessageAccoutPanel thread cancelled", ex);
             } catch (InterruptedException | ExecutionException ex) {
@@ -153,6 +223,108 @@ final class MessageAccountPanel extends JPanel {
             }
         }
 
+    }
+    
+    /**
+     * Background task that fetches accounts for a message artifact by
+     * searchingfor accounts by account identifers in the To/From attributes of
+     * the message.
+     */
+    class AccountsByIdentifierFetcher extends AccountFetcher {
+
+        /**
+         * Construct a new AccountsByIdentifierFetcher.
+         *
+         * @param artifact The artifact to get accounts for.
+         */
+        AccountsByIdentifierFetcher(BlackboardArtifact artifact) {
+            super(artifact);
+        }
+
+        @Override
+        protected List<AccountContainer> doInBackground() throws Exception {
+            List<AccountContainer> dataList = new ArrayList<>();
+
+            List<String> accountIdentifiers = new ArrayList<>();
+
+            // make a list of account identifiers from TO & FROM attributes.
+            for (Integer attrTypeId : ACCOUNT_ATTRIBUTE_TYPES) {
+                accountIdentifiers.addAll(getIdentifiersFromAttribute(artifact, BlackboardAttribute.ATTRIBUTE_TYPE.fromID(attrTypeId)));
+            }
+
+            if (isCancelled()) {
+                return new ArrayList<>();
+            }
+
+            CommunicationsManager commManager = Case.getCurrentCase().getSleuthkitCase().getCommunicationsManager();
+
+            // for each account identifer
+            for (String accountIdentifier : accountIdentifiers) {
+
+                if (isCancelled()) {
+                    return new ArrayList<>();
+                }
+
+                Collection<CentralRepoAccount> candidateAccounts = CentralRepoAccount.getAccountsWithIdentifier(accountIdentifier);
+
+                if (!candidateAccounts.isEmpty()) {
+
+                    CentralRepoAccount centralRepoAccount = candidateAccounts.iterator().next();
+
+                    Account account = commManager.getAccount(centralRepoAccount.getAccountType().getAcctType(), centralRepoAccount.getIdentifier());
+                    Collection<PersonaAccount> personAccounts = PersonaAccount.getPersonaAccountsForAccount(account);
+
+                    if (personAccounts != null && !personAccounts.isEmpty()) {
+                        for (PersonaAccount personaAccount : PersonaAccount.getPersonaAccountsForAccount(account)) {
+                            dataList.add(new AccountContainer(account, personaAccount));
+                        }
+                    } else {
+                        dataList.add(new AccountContainer(account, null));
+                    }
+
+                }
+            }
+            //  
+
+            return dataList;
+        }
+
+        
+        @Override
+        protected void done() {
+            try {
+                List<AccountContainer> dataList = get();
+
+                
+                showAccounts(dataList);
+                
+            } catch (CancellationException ex) {
+                logger.log(Level.INFO, "MessageAccoutPanel thread cancelled", ex);
+            } catch (InterruptedException | ExecutionException ex) {
+                logger.log(Level.WARNING, "Failed to get account list for MessageAccountPanel", ex);
+            }
+        }
+
+        Collection<String> getIdentifiersFromAttribute(BlackboardArtifact artifact, BlackboardAttribute.ATTRIBUTE_TYPE attributeType) throws TskCoreException {
+            List<String> accountIdentifiers = new ArrayList<>();
+
+            BlackboardAttribute attribute = artifact.getAttribute(new BlackboardAttribute.Type(attributeType));
+
+            if (attribute != null) {
+                // some attributes are a comma separated list of account identifiers
+                // email address lists may be separated by ';'
+                String[] attributeAccountIDs = attribute.getValueString().split(",|;");
+                if (attributeAccountIDs.length > 0) {
+                    for (String attributeAccountID : attributeAccountIDs) {
+                        accountIdentifiers.add(StringUtils.trim(attributeAccountID));
+                    }
+                }
+            }
+            return accountIdentifiers;
+        }
+                
+    }
+    
         /**
          * Create the main horizontal ParalleGroup the encompasses all of the
          * controls.
@@ -222,7 +394,7 @@ final class MessageAccountPanel extends JPanel {
             return group;
         }
 
-    }
+    
 
     /**
      * Container for each account entry in the panel. This class holds both the
